@@ -1,3 +1,5 @@
+> **v2.0** — 已升级为 Linear/Notion 风格，详见 [CHANGELOG.md](./CHANGELOG.md)
+
 # ✅ 待办事项 (Todo App)
 
 一个功能完善的单页待办事项应用，纯 HTML/CSS/JS，无需任何依赖，双击即用。
