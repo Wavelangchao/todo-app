@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>待办事项</title>
+<title>Todo</title>
 <style>
   :root {
     --bg: #f0f2f5;
@@ -265,81 +265,110 @@
 </style>
 </head>
 <body>
-<div class="app">
-  <!-- header -->
-  <div class="top-bar">
-    <h1>✅ 待办事项</h1>
-    <div class="actions">
-      <button class="icon-btn" id="btn-theme" title="切换深色模式">🌓<span class="tooltip">主题</span></button>
-      <button class="icon-btn" id="btn-export" title="导出数据">📤<span class="tooltip">导出</span></button>
-      <button class="icon-btn" id="btn-import" title="导入数据">📥<span class="tooltip">导入</span></button>
+<div class="app-layout">
+  <!-- 侧边栏 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-logo">Todo</span>
+      <button class="sidebar-toggle" id="btn-toggle-sidebar" title="折叠侧边栏 (Ctrl+B)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="10,3 5,8 10,13"/></svg>
+      </button>
     </div>
-  </div>
-  <div class="date-row" id="date"></div>
-
-  <!-- search -->
-  <div class="search-wrap">
-    <span style="font-size:14px;opacity:.5;padding-left:4px;">🔍</span>
-    <input type="text" id="search" placeholder="搜索任务… (Ctrl+K)">
-    <button class="clear-search" id="clear-search">×</button>
-  </div>
-
-  <!-- add bar -->
-  <div class="add-bar" autocomplete="off">
-    <input type="text" id="input" placeholder="添加新任务…" maxlength="200">
-    <select id="priority" title="优先级">
-      <option value="low">🟢 低</option>
-      <option value="med" selected>🟡 中</option>
-      <option value="high">🔴 高</option>
-    </select>
-    <select id="category" title="分类">
-      <option value="个人">👤 个人</option>
-      <option value="工作">💼 工作</option>
-      <option value="学习">📚 学习</option>
-      <option value="生活">🏠 生活</option>
-    </select>
-    <input type="date" id="due-date" title="截止日期">
-    <button class="btn-add" type="button" id="btn-add">＋ 添加</button>
-  </div>
-
-  <!-- toolbar: filters + sort -->
-  <div class="toolbar">
-    <button class="chip active" data-filter="all">全部</button>
-    <button class="chip" data-filter="active">未完成</button>
-    <button class="chip" data-filter="done">已完成</button>
-    <button class="chip" data-filter="high">🔴 高优先</button>
-    <button class="chip" data-filter="overdue">⚠ 已逾期</button>
-    <span class="spacer"></span>
-    <select id="sort-by">
-      <option value="newest">最新 → 最旧</option>
-      <option value="oldest">最旧 → 最新</option>
-      <option value="priority">优先级</option>
-      <option value="due">截止日期</option>
-      <option value="name">名称 A-Z</option>
-    </select>
-  </div>
-
-  <!-- progress -->
-  <div class="progress-wrap">
-    <div class="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
-    <span id="progress-text">0%</span>
-  </div>
-
-  <!-- list -->
-  <div class="list" id="list"></div>
-
-  <!-- footer -->
-  <div class="footer">
-    <span id="count">0 项任务</span>
-    <div style="display:flex;gap:6px;">
-      <button id="clear-done">清除已完成</button>
-      <button id="clear-all" style="color:var(--danger);">清空全部</button>
+    <nav class="sidebar-nav" id="sidebar-nav">
+      <!-- 动态渲染分类列表 -->
+    </nav>
+    <div class="sidebar-footer">
+      <button class="btn-new-cat" id="btn-new-cat">+ 新分类</button>
     </div>
-  </div>
+  </aside>
+
+  <!-- 主内容 -->
+  <main class="main">
+    <!-- 命令栏 -->
+    <div class="command-bar" id="command-bar">
+      <span class="cmd-icon">🔍</span>
+      <input type="text" id="cmd-input" class="cmd-input" placeholder="搜索或输入命令... (Ctrl+K)" autocomplete="off">
+      <div class="cmd-dropdown" id="cmd-dropdown">
+        <div class="cmd-results" id="cmd-results"></div>
+        <div class="cmd-actions" id="cmd-actions">
+          <button class="cmd-action" data-action="add">＋ 添加任务</button>
+          <button class="cmd-action" data-action="clear-done">🗑 清除已完成</button>
+          <button class="cmd-action" data-action="export">📤 导出数据</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 统计条 -->
+    <div class="stats-bar">
+      <div class="stats-info">
+        <span id="stats-text">3 项未完成 · 共 5 项</span>
+        <span class="stats-dot">·</span>
+        <div class="progress-mini" id="progress-mini">
+          <div class="progress-mini-fill" id="progress-mini-fill"></div>
+        </div>
+        <span id="progress-pct">60%</span>
+      </div>
+      <div class="stats-tools">
+        <select id="filter-select" class="filter-select">
+          <option value="all">全部</option>
+          <option value="active">未完成</option>
+          <option value="done">已完成</option>
+          <option value="high">高优先</option>
+          <option value="overdue">已逾期</option>
+        </select>
+        <select id="sort-select" class="sort-select">
+          <option value="newest">最新优先</option>
+          <option value="oldest">最早优先</option>
+          <option value="priority">优先级</option>
+          <option value="due">截止日期</option>
+          <option value="name">名称 A-Z</option>
+        </select>
+        <button class="icon-btn-mini" id="btn-theme" title="主题">🌓</button>
+        <button class="icon-btn-mini" id="btn-export" title="导出">📤</button>
+        <button class="icon-btn-mini" id="btn-import" title="导入">📥</button>
+      </div>
+    </div>
+
+    <!-- 添加任务行 -->
+    <div class="add-row" id="add-row">
+      <span class="add-prio-bar prio-med-bar"></span>
+      <button class="add-checkbox-placeholder">+</button>
+      <div class="add-input-area" id="add-input-area">
+        <input type="text" class="add-input" id="add-input" placeholder="添加任务，按回车确认..." maxlength="200">
+        <div class="add-options" id="add-options">
+          <select id="add-priority" class="add-select">
+            <option value="low">低优先</option>
+            <option value="med" selected>中优先</option>
+            <option value="high">高优先</option>
+          </select>
+          <select id="add-category" class="add-select">
+            <option value="个人">👤 个人</option>
+            <option value="工作">💼 工作</option>
+            <option value="学习">📚 学习</option>
+            <option value="生活">🏠 生活</option>
+          </select>
+          <input type="date" id="add-due" class="add-date">
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务列表 -->
+    <div class="task-list" id="task-list">
+      <!-- 动态渲染 -->
+    </div>
+
+    <!-- 底部操作 -->
+    <div class="bottom-bar">
+      <button class="btn-text" id="btn-clear-done">清除已完成</button>
+      <button class="btn-text btn-text-danger" id="btn-clear-all">清空全部</button>
+    </div>
+  </main>
 </div>
 
-<!-- hidden file input for import -->
+<!-- 隐藏的 import input -->
 <input type="file" id="import-file" accept=".json" style="display:none;">
+<!-- Toast 容器 -->
+<div class="toast-container" id="toast-container"></div>
 
 <script>
 (() => {
