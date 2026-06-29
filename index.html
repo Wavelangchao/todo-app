@@ -255,6 +255,8 @@
   @keyframes slideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes slideOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(40px); } }
   .todo-item.removing { animation: slideOut .2s ease forwards; }
+  .todo-item.overdue { background: var(--danger-light); }
+  .todo-item.overdue .todo-prio-bar { background: var(--prio-high); }
 
   .todo-item:hover { background: var(--hover-bg); }
   .todo-item:hover .todo-actions { opacity: 1; }
@@ -341,8 +343,12 @@
   @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   .toast button { background: none; border: none; color: var(--accent); cursor: pointer; font-weight: 600; font-size: 13px; }
 
+  /* ---- mobile menu ---- */
+  .mobile-menu-btn { display: none; }
+
   /* ---- responsive ---- */
   @media (max-width: 768px) {
+    .mobile-menu-btn { display: flex; }
     .sidebar { transform: translateX(-100%); transition: transform .2s ease; }
     .sidebar.mobile-open { transform: translateX(0); }
     .main { margin-left: 0 !important; padding: 20px 16px 40px; }
@@ -389,6 +395,13 @@
         </div>
       </div>
     </div>
+
+    <!-- 移动端汉堡菜单 -->
+    <button class="mobile-menu-btn" id="btn-mobile-menu" title="菜单">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="5" x2="17" y2="5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="15" x2="17" y2="15"/>
+      </svg>
+    </button>
 
     <!-- 统计条 -->
     <div class="stats-bar">
@@ -603,6 +616,7 @@
         saveActiveCat();
         renderSidebar();
         renderTaskList();
+        $('#sidebar').classList.remove('mobile-open');
       });
     });
 
@@ -640,7 +654,7 @@
         dueHtml = `<span class="meta-due ${cls}">📅 ${t.due}${overdue?' (逾期)':(today?' (今天)':'')}</span>`;
       }
       return `
-        <div class="todo-item${t.done?' done':''}" data-idx="${idx}">
+        <div class="todo-item${t.done?' done':''}${overdue?' overdue':''}" data-idx="${idx}">
           <span class="todo-prio-bar prio-${t.priority||'med'}"></span>
           <input type="checkbox" class="todo-checkbox" ${t.done?'checked':''} data-idx="${idx}">
           <div class="todo-content" data-idx="${idx}">
@@ -900,6 +914,11 @@
     // bottom bar
     $('#btn-clear-done').addEventListener('click', clearDone);
     $('#btn-clear-all').addEventListener('click', clearAll);
+
+    // 移动菜单
+    $('#btn-mobile-menu').addEventListener('click', () => {
+      $('#sidebar').classList.toggle('mobile-open');
+    });
 
     // sidebar
     $('#btn-toggle-sidebar').addEventListener('click', toggleSidebar);
