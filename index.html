@@ -465,57 +465,52 @@
 <script>
 (() => {
   const STORAGE_KEY = 'todo-app-pro-v3';
+  const CATEGORIES_KEY = 'todo-categories';
+  const SIDEBAR_KEY = 'todo-sidebar-collapsed';
+  const ACTIVE_CAT_KEY = 'todo-active-cat';
+  const DEFAULT_CATS = ['个人','工作','学习','生活'];
+  const CAT_ICONS = { '个人':'👤', '工作':'💼', '学习':'📚', '生活':'🏠' };
 
-  // ---- state ----
   let todos = [];
   let filter = 'all';
   let sortBy = 'newest';
-  let searchQuery = '';
-  let lastDeleted = null;   // for undo
+  let activeCat = loadActiveCat(); // null means "all"
+  let lastDeleted = null;
   let toastTimer = null;
 
-  // ---- DOM refs ----
   const $ = (sel, ctx) => (ctx || document).querySelector(sel);
   const $$ = (sel, ctx) => [...(ctx || document).querySelectorAll(sel)];
 
-  const $input    = $('#input');
-  const $priority = $('#priority');
-  const $category = $('#category');
-  const $dueDate  = $('#due-date');
-  const $search   = $('#search');
-  const $clearSearch = $('#clear-search');
-  const $list     = $('#list');
-  const $count    = $('#count');
-  const $date     = $('#date');
-  const $sortBy   = $('#sort-by');
-  const $progressFill = $('#progress-fill');
-  const $progressText = $('#progress-text');
-  const $filterChips = $$('#list'); // placeholder — will bind below
-
-  // ---- date ----
-  function updateDate() {
-    const now = new Date();
-    const week = ['日','一','二','三','四','五','六'];
-    $date.textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 星期${week[now.getDay()]}`;
+  function loadActiveCat() {
+    const v = localStorage.getItem(ACTIVE_CAT_KEY);
+    return v === 'all' || v === null ? null : v;
   }
-  updateDate();
+  function saveActiveCat() { localStorage.setItem(ACTIVE_CAT_KEY, activeCat || 'all'); }
 
-  // ---- load / save ----
-  function load() {
-    try { todos = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch(e) { todos = []; }
-  }
+  function load() { try { todos = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch(e) { todos = []; } }
   function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(todos)); }
 
-  // ---- helpers ----
+  function loadCategories() {
+    try { return JSON.parse(localStorage.getItem(CATEGORIES_KEY)) || [...DEFAULT_CATS]; }
+    catch(e) { return [...DEFAULT_CATS]; }
+  }
+  function saveCategories(cats) { localStorage.setItem(CATEGORIES_KEY, JSON.stringify(cats)); }
+
   function fmtDate(ts) {
     const d = new Date(ts);
     const pad = n => String(n).padStart(2,'0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   }
-  function fmtDateTime(ts) {
-    const d = new Date(ts);
-    const pad = n => String(n).padStart(2,'0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  function fmtRelative(ts) {
+    const diff = Date.now() - ts;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return '刚刚';
+    if (mins < 60) return `${mins} 分钟前`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} 小时前`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days} 天前`;
+    return fmtDate(ts);
   }
   function esc(s) {
     const div = document.createElement('div');
@@ -526,121 +521,134 @@
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
-  function prioLabel(p) { return {high:'高',med:'中',low:'低'}[p] || '中'; }
   function prioWeight(p) { return {high:0,med:1,low:2}[p] || 1; }
-  function isOverdue(t) {
-    if (!t.due || t.done) return false;
-    return t.due < todayStr();
-  }
-  function isToday(t) {
-    if (!t.due || t.done) return false;
-    return t.due === todayStr();
-  }
+  function isOverdue(t) { return !t.done && t.due && t.due < todayStr(); }
+  function isToday(t) { return !t.done && t.due && t.due === todayStr(); }
 
-  // ---- toast ----
   function showToast(msg, actionLabel, actionFn) {
-    const old = $('.toast');
+    const container = $('#toast-container');
+    const old = container.querySelector('.toast');
     if (old) old.remove();
     if (toastTimer) clearTimeout(toastTimer);
 
     const el = document.createElement('div');
     el.className = 'toast';
     el.innerHTML = `<span>${msg}</span>` + (actionLabel ? `<button>${actionLabel}</button>` : '');
-    document.body.appendChild(el);
+    container.appendChild(el);
 
     if (actionLabel && actionFn) {
-      el.querySelector('button').addEventListener('click', () => {
-        actionFn();
-        el.remove();
-      });
+      el.querySelector('button').addEventListener('click', () => { actionFn(); el.remove(); });
     }
-
-    toastTimer = setTimeout(() => {
-      el.style.opacity = '0';
-      el.style.transition = 'opacity .2s';
-      setTimeout(() => el.remove(), 200);
-    }, 3000);
+    toastTimer = setTimeout(() => { el.style.opacity='0'; el.style.transition='opacity .2s';
+      setTimeout(() => el.remove(), 200); }, 3000);
   }
 
-  // ---- filtered + sorted list ----
+  function getCategories() {
+    const saved = loadCategories();
+    const fromData = todos.map(t => t.cat).filter(Boolean);
+    const merged = [...new Set([...DEFAULT_CATS, ...saved, ...fromData])];
+    return merged;
+  }
+
   function getFilteredAndSorted() {
     let result = [...todos];
-
-    // filter
+    if (activeCat) result = result.filter(t => (t.cat || '个人') === activeCat);
     switch (filter) {
       case 'active':  result = result.filter(t => !t.done); break;
       case 'done':    result = result.filter(t => t.done); break;
       case 'high':    result = result.filter(t => !t.done && t.priority === 'high'); break;
       case 'overdue': result = result.filter(t => isOverdue(t)); break;
     }
-
-    // search
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(t => t.text.toLowerCase().includes(q) || (t.cat || '').toLowerCase().includes(q));
-    }
-
-    // sort
     switch (sortBy) {
-      case 'oldest':    result.sort((a,b) => a.ts - b.ts); break;
-      case 'priority':  result.sort((a,b) => prioWeight(a.priority) - prioWeight(b.priority) || a.ts - b.ts); break;
+      case 'oldest':   result.sort((a,b) => a.ts - b.ts); break;
+      case 'priority': result.sort((a,b) => prioWeight(a.priority) - prioWeight(b.priority) || a.ts - b.ts); break;
       case 'due':
         result.sort((a,b) => {
           if (!a.due && !b.due) return a.ts - b.ts;
-          if (!a.due) return 1;
-          if (!b.due) return -1;
+          if (!a.due) return 1; if (!b.due) return -1;
           return a.due.localeCompare(b.due) || a.ts - b.ts;
-        });
-        break;
+        }); break;
       case 'name': result.sort((a,b) => a.text.localeCompare(b.text, 'zh')); break;
-      default: /* newest */ result.sort((a,b) => b.ts - a.ts); break;
+      default: result.sort((a,b) => b.ts - a.ts);
     }
-
     return result;
   }
 
-  // ---- render ----
-  function render() {
+  function renderSidebar() {
+    const nav = $('#sidebar-nav');
+    const cats = getCategories();
+    const counts = {};
+    cats.forEach(c => { counts[c] = todos.filter(t => (t.cat || '个人') === c && !t.done).length; });
+    const totalActive = todos.filter(t => !t.done).length;
+
+    nav.innerHTML = `
+      <div class="cat-item ${activeCat === null ? 'active' : ''}" data-cat="all">
+        <span class="cat-icon">📋</span>
+        <span class="cat-name">全部</span>
+        <span class="cat-count">${totalActive}</span>
+      </div>
+      ${cats.map(c => `
+        <div class="cat-item ${activeCat === c ? 'active' : ''}" data-cat="${esc(c)}">
+          <span class="cat-icon">${CAT_ICONS[c] || '📌'}</span>
+          <span class="cat-name">${esc(c)}</span>
+          <span class="cat-count">${counts[c] || 0}</span>
+        </div>
+      `).join('')}
+    `;
+
+    nav.querySelectorAll('.cat-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const cat = item.dataset.cat;
+        activeCat = cat === 'all' ? null : cat;
+        saveActiveCat();
+        renderSidebar();
+        renderTaskList();
+      });
+    });
+
+    // update add-category select options
+    const addCatSelect = $('#add-category');
+    if (addCatSelect) {
+      addCatSelect.innerHTML = cats.map(c => `<option value="${esc(c)}">${CAT_ICONS[c] || '📌'} ${esc(c)}</option>`).join('');
+    }
+  }
+
+  function renderTaskList() {
     const filtered = getFilteredAndSorted();
+    const list = $('#task-list');
     const activeCount = todos.filter(t => !t.done).length;
     const doneCount = todos.length - activeCount;
     const pct = todos.length ? Math.round((doneCount / todos.length) * 100) : 0;
 
-    $progressFill.style.width = pct + '%';
-    $progressText.textContent = `${pct}%`;
-    $count.textContent = `${activeCount} 项未完成 / 共 ${todos.length} 项`;
+    $('#stats-text').textContent = `${activeCount} 项未完成 · 共 ${todos.length} 项`;
+    $('#progress-pct').textContent = `${pct}%`;
+    $('#progress-mini-fill').style.width = pct + '%';
 
     if (!filtered.length) {
-      const msgs = {
-        all: '还没有任务，添加一个吧 ✨',
-        active: '所有任务已完成 🎉',
-        done: '还没有已完成的任务',
-        high: '没有高优先级任务',
-        overdue: '没有逾期任务 👍',
-      };
-      $list.innerHTML = `<div class="empty-state"><span class="icon">${filter === 'active' ? '🎉' : '📋'}</span><p>${msgs[filter] || '没有匹配的任务'}</p></div>`;
+      const msgs = { all:'还没有任务', active:'所有任务已完成 🎉', done:'还没有已完成的任务', high:'没有高优先级任务', overdue:'没有逾期任务 👍' };
+      list.innerHTML = `<div class="empty-state"><span class="empty-icon">${filter==='active'?'🎉':'📋'}</span><span class="empty-text">${msgs[filter]||'没有匹配的任务'}</span></div>`;
       return;
     }
 
-    $list.innerHTML = filtered.map(t => {
+    list.innerHTML = filtered.map(t => {
       const idx = todos.indexOf(t);
       const overdue = isOverdue(t);
       const today = isToday(t);
       let dueHtml = '';
       if (t.due) {
-        const cls = overdue ? 'overdue-text' : (today ? 'today-text' : '');
-        dueHtml = `<span class="due-tag ${cls}">📅 ${t.due}${overdue ? ' (逾期)' : (today ? ' (今天)' : '')}</span>`;
+        const cls = overdue ? 'overdue' : (today ? 'today' : '');
+        dueHtml = `<span class="meta-due ${cls}">📅 ${t.due}${overdue?' (逾期)':(today?' (今天)':'')}</span>`;
       }
       return `
-        <div class="todo${t.done ? ' done' : ''}${overdue ? ' overdue' : ''}" data-idx="${idx}">
-          <span class="prio-dot prio-${t.priority || 'med'}" title="优先级: ${prioLabel(t.priority)}"></span>
-          <input type="checkbox" ${t.done ? 'checked' : ''} data-idx="${idx}" title="切换完成状态">
-          <div class="todo-main" data-idx="${idx}" title="双击编辑">
+        <div class="todo-item${t.done?' done':''}" data-idx="${idx}">
+          <span class="todo-prio-bar prio-${t.priority||'med'}"></span>
+          <input type="checkbox" class="todo-checkbox" ${t.done?'checked':''} data-idx="${idx}">
+          <div class="todo-content" data-idx="${idx}">
             <span class="todo-text" contenteditable="false">${esc(t.text)}</span>
             <div class="todo-meta">
-              <span class="cat-tag">${esc(t.cat || '个人')}</span>
+              <span class="meta-cat">${CAT_ICONS[t.cat]||'📌'} ${esc(t.cat||'个人')}</span>
               ${dueHtml}
-              <span>${fmtDateTime(t.ts)}</span>
+              <span class="meta-time">${fmtRelative(t.ts)}</span>
             </div>
           </div>
           <div class="todo-actions">
@@ -651,21 +659,20 @@
     }).join('');
   }
 
-  // ---- actions ----
+  function renderAll() { renderSidebar(); renderTaskList(); }
+
   function addTodo() {
-    const text = $input.value.trim();
+    const input = $('#add-input');
+    const text = input.value.trim();
     if (!text) return;
-    todos.unshift({
-      text,
-      done: false,
-      priority: $priority.value,
-      cat: $category.value,
-      due: $dueDate.value || null,
-      ts: Date.now(),
-    });
-    $input.value = '';
-    $dueDate.value = '';
-    save(); render();
+    const priority = $('#add-priority').value;
+    const cat = $('#add-category').value;
+    const due = $('#add-due').value || null;
+    todos.unshift({ text, done: false, priority, cat, due, ts: Date.now() });
+    input.value = '';
+    $('#add-due').value = '';
+    $('#add-options').classList.remove('open');
+    save(); renderAll();
   }
 
   function toggleTodo(idx) {
@@ -673,70 +680,92 @@
     todos[idx].done = !todos[idx].done;
     if (todos[idx].done) todos[idx].completedTs = Date.now();
     else delete todos[idx].completedTs;
-    save(); render();
+    save(); renderAll();
   }
 
   function removeTodo(idx) {
     if (idx < 0 || idx >= todos.length) return;
     lastDeleted = { item: todos[idx], idx };
     todos.splice(idx, 1);
-    save(); render();
+    save(); renderAll();
     showToast('已删除', '撤销', () => {
       todos.splice(lastDeleted.idx, 0, lastDeleted.item);
-      save(); render();
-      showToast('已恢复');
+      save(); renderAll(); showToast('已恢复');
     });
   }
 
   function editTodoText(idx) {
-    const span = document.querySelector(`.todo[data-idx="${idx}"] .todo-text`);
-    if (!span) return;
-    span.contentEditable = 'true';
-    span.focus();
-    // select all text
+    const el = document.querySelector(`.todo-item[data-idx="${idx}"] .todo-text`);
+    if (!el) return;
+    el.contentEditable = 'true';
+    el.focus();
     const range = document.createRange();
-    range.selectNodeContents(span);
+    range.selectNodeContents(el);
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
   }
 
   function commitEdit(idx) {
-    const span = document.querySelector(`.todo[data-idx="${idx}"] .todo-text`);
-    if (!span || span.contentEditable !== 'true') return;
-    span.contentEditable = 'false';
-    const newText = span.textContent.trim();
-    if (newText && idx >= 0 && idx < todos.length) {
-      todos[idx].text = newText;
-      save();
-    }
-    render();
+    const el = document.querySelector(`.todo-item[data-idx="${idx}"] .todo-text`);
+    if (!el || el.contentEditable !== 'true') return;
+    el.contentEditable = 'false';
+    const text = el.textContent.trim();
+    if (text && idx >= 0 && idx < todos.length) { todos[idx].text = text; save(); }
+    renderAll();
   }
 
   function clearDone() {
     const count = todos.filter(t => t.done).length;
     if (!count) return;
     todos = todos.filter(t => !t.done);
-    save(); render();
-    showToast(`已清除 ${count} 项已完成任务`);
+    save(); renderAll(); showToast(`已清除 ${count} 项已完成任务`);
   }
 
   function clearAll() {
     if (!todos.length) return;
-    if (!confirm(`确定要删除全部 ${todos.length} 项任务吗？此操作不可撤销。`)) return;
-    todos = [];
-    save(); render();
-    showToast('已清空全部任务');
+    if (!confirm(`确定删除全部 ${todos.length} 项？不可撤销。`)) return;
+    todos = []; save(); renderAll(); showToast('已清空全部');
   }
 
-  // ---- export / import ----
+  function handleCommandInput() {
+    const q = $('#cmd-input').value.trim().toLowerCase();
+    const dropdown = $('#cmd-dropdown');
+    const results = $('#cmd-results');
+    const actions = $('#cmd-actions');
+
+    if (!q) {
+      results.innerHTML = '';
+      dropdown.classList.add('open');
+      return;
+    }
+
+    const matches = todos.filter(t => t.text.toLowerCase().includes(q) || (t.cat||'').toLowerCase().includes(q)).slice(0, 8);
+    if (matches.length) {
+      results.innerHTML = matches.map(t => {
+        const idx = todos.indexOf(t);
+        return `<div class="cmd-result-item" data-idx="${idx}">
+          <span>${t.done?'✅':'○'}</span>
+          <span class="result-text">${esc(t.text)}</span>
+          <span class="result-meta">${esc(t.cat||'')}</span>
+        </div>`;
+      }).join('');
+    } else {
+      results.innerHTML = `<div class="cmd-empty">无匹配结果，按回车创建新任务</div>`;
+    }
+    dropdown.classList.add('open');
+  }
+
+  function closeCommandDropdown() {
+    $('#cmd-dropdown').classList.remove('open');
+    $('#cmd-input').value = '';
+  }
+
   function exportData() {
-    const blob = new Blob([JSON.stringify(todos, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(todos,null,2)],{type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `todo-backup-${todayStr()}.json`;
-    a.click();
+    a.href = url; a.download = `todo-backup-${todayStr()}.json`; a.click();
     URL.revokeObjectURL(url);
     showToast('数据已导出');
   }
@@ -747,154 +776,185 @@
       try {
         const data = JSON.parse(reader.result);
         if (!Array.isArray(data)) throw new Error('格式错误');
-        // basic validation
-        for (const item of data) {
-          if (!item.text || typeof item.text !== 'string') throw new Error('数据格式不正确');
-        }
-        if (!confirm(`即将导入 ${data.length} 项任务。\n选择"确定"将替换当前数据，选择"取消"将合并到当前列表。`)) {
-          // merge: prepend imported items
-          const merged = [...data, ...todos];
-          // dedupe by text+ts
-          const seen = new Set();
-          todos = merged.filter(t => {
-            const key = t.text + t.ts;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-        } else {
-          todos = data;
-        }
-        save(); render();
-        showToast(`成功导入 ${data.length} 项任务`);
-      } catch(e) {
-        alert('导入失败：文件格式不正确，请选择有效的 JSON 备份文件。');
-      }
+        for (const t of data) { if (!t.text||typeof t.text!=='string') throw new Error('格式错误'); }
+        if (!confirm(`导入 ${data.length} 项任务。确定替换当前数据？取消将合并。`)) {
+          const seen = new Set(todos.map(t=>t.text+t.ts));
+          todos = [...data.filter(t=>!seen.has(t.text+t.ts)), ...todos];
+        } else { todos = data; }
+        save(); renderAll(); showToast(`成功导入 ${data.length} 项`);
+      } catch(e) { alert('导入失败：JSON 格式不正确'); }
     };
     reader.readAsText(file);
   }
 
-  // ---- theme ----
   function applyTheme() {
-    const dark = localStorage.getItem('todo-theme') === 'dark';
+    const dark = localStorage.getItem('todo-theme')==='dark';
     document.body.classList.toggle('dark', dark);
   }
   function toggleTheme() {
     const dark = !document.body.classList.contains('dark');
-    localStorage.setItem('todo-theme', dark ? 'dark' : 'light');
+    localStorage.setItem('todo-theme', dark?'dark':'light');
     applyTheme();
   }
 
-  // ---- event bindings ----
+  let sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY)==='true';
+  function applySidebar() { $('#sidebar').classList.toggle('collapsed', sidebarCollapsed); }
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed);
+    applySidebar();
+  }
+
   function bindEvents() {
-    // add
-    $('#btn-add').addEventListener('click', addTodo);
-    $input.addEventListener('keydown', e => {
+    // add todo
+    $('#add-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); addTodo(); }
     });
-
-    // search
-    $search.addEventListener('input', () => {
-      searchQuery = $search.value.trim();
-      $clearSearch.classList.toggle('visible', !!searchQuery);
-      render();
+    $('#add-input').addEventListener('focus', () => {
+      $('#add-options').classList.add('open');
     });
-    $clearSearch.addEventListener('click', () => {
-      $search.value = '';
-      searchQuery = '';
-      $clearSearch.classList.remove('visible');
-      render();
-      $search.focus();
+    $('#add-checkbox-placeholder').addEventListener('click', () => {
+      $('#add-input').focus();
     });
 
-    // filter chips
-    $$('.toolbar .chip').forEach(chip => {
-      chip.addEventListener('click', () => {
-        $$('.toolbar .chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        filter = chip.dataset.filter;
-        render();
-      });
+    // command bar
+    $('#cmd-input').addEventListener('input', handleCommandInput);
+    $('#cmd-input').addEventListener('focus', () => {
+      $('#cmd-dropdown').classList.add('open');
+    });
+    $('#cmd-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const q = $('#cmd-input').value.trim();
+        if (q) {
+          const matches = todos.filter(t => t.text.toLowerCase().includes(q.toLowerCase()));
+          if (matches.length === 1) {
+            // jump to that task
+            const idx = todos.indexOf(matches[0]);
+            const el = document.querySelector(`.todo-item[data-idx="${idx}"]`);
+            if (el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.style.background='var(--accent-light)'; setTimeout(()=>el.style.background='',1500); }
+          } else {
+            // create new task
+            $('#add-input').value = q;
+            $('#add-input').focus();
+            $('#add-options').classList.add('open');
+          }
+        }
+        closeCommandDropdown();
+      }
+      if (e.key === 'Escape') closeCommandDropdown();
+    });
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.command-bar')) closeCommandDropdown();
+    });
+    // cmd dropdown clicks
+    $('#cmd-dropdown').addEventListener('click', e => {
+      const item = e.target.closest('.cmd-result-item');
+      const action = e.target.closest('.cmd-action');
+      if (item) {
+        const idx = Number(item.dataset.idx);
+        const el = document.querySelector(`.todo-item[data-idx="${idx}"]`);
+        if (el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.style.background='var(--accent-light)'; setTimeout(()=>el.style.background='',1500); }
+        closeCommandDropdown();
+      }
+      if (action) {
+        const act = action.dataset.action;
+        if (act === 'add') { $('#add-input').focus(); $('#add-options').classList.add('open'); }
+        if (act === 'clear-done') clearDone();
+        if (act === 'export') exportData();
+        closeCommandDropdown();
+      }
     });
 
-    // sort
-    $sortBy.addEventListener('change', () => {
-      sortBy = $sortBy.value;
-      render();
-    });
-
-    // list: checkbox, delete, edit, double-click
-    $list.addEventListener('click', e => {
-      const cb = e.target.closest('input[type="checkbox"]');
+    // task list events
+    $('#task-list').addEventListener('click', e => {
+      const cb = e.target.closest('.todo-checkbox');
       const del = e.target.closest('.btn-del');
       const edit = e.target.closest('.btn-edit');
       if (cb) { toggleTodo(Number(cb.dataset.idx)); return; }
       if (del) { removeTodo(Number(del.dataset.idx)); return; }
       if (edit) { editTodoText(Number(edit.dataset.idx)); return; }
     });
-
-    $list.addEventListener('dblclick', e => {
-      const main = e.target.closest('.todo-main');
-      if (main) editTodoText(Number(main.dataset.idx));
+    $('#task-list').addEventListener('dblclick', e => {
+      const content = e.target.closest('.todo-content');
+      if (content) editTodoText(Number(content.dataset.idx));
     });
-
-    // commit inline edit on blur or Enter
-    $list.addEventListener('keydown', e => {
+    $('#task-list').addEventListener('keydown', e => {
       if (e.key === 'Enter' && e.target.classList.contains('todo-text')) {
         e.preventDefault();
-        const todoEl = e.target.closest('.todo');
-        if (todoEl) commitEdit(Number(todoEl.dataset.idx));
+        const item = e.target.closest('.todo-item');
+        if (item) commitEdit(Number(item.dataset.idx));
       }
     });
-    $list.addEventListener('focusout', e => {
+    $('#task-list').addEventListener('focusout', e => {
       if (e.target.classList.contains('todo-text')) {
-        const todoEl = e.target.closest('.todo');
-        if (todoEl) commitEdit(Number(todoEl.dataset.idx));
+        const item = e.target.closest('.todo-item');
+        if (item) commitEdit(Number(item.dataset.idx));
       }
     });
 
-    // clear
-    $('#clear-done').addEventListener('click', clearDone);
-    $('#clear-all').addEventListener('click', clearAll);
+    // filter & sort
+    $('#filter-select').addEventListener('change', function() { filter = this.value; renderTaskList(); });
+    $('#sort-select').addEventListener('change', function() { sortBy = this.value; renderTaskList(); });
+
+    // bottom bar
+    $('#btn-clear-done').addEventListener('click', clearDone);
+    $('#btn-clear-all').addEventListener('click', clearAll);
+
+    // sidebar
+    $('#btn-toggle-sidebar').addEventListener('click', toggleSidebar);
+    $('#btn-new-cat').addEventListener('click', () => {
+      const name = prompt('输入新分类名称：');
+      if (name && name.trim()) {
+        const cats = loadCategories();
+        if (!cats.includes(name.trim())) {
+          cats.push(name.trim());
+          saveCategories(cats);
+          // also add as add-category option
+          const opt = document.createElement('option');
+          opt.value = name.trim();
+          opt.textContent = '📌 ' + name.trim();
+          $('#add-category').appendChild(opt);
+        }
+        renderAll();
+      }
+    });
 
     // theme
     $('#btn-theme').addEventListener('click', toggleTheme);
 
-    // export
+    // import/export
     $('#btn-export').addEventListener('click', exportData);
-
-    // import
     $('#btn-import').addEventListener('click', () => $('#import-file').click());
     $('#import-file').addEventListener('change', e => {
       if (e.target.files[0]) importData(e.target.files[0]);
       e.target.value = '';
     });
 
-    // global keyboard shortcuts
+    // global shortcuts
     document.addEventListener('keydown', e => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        $search.focus();
-      }
-      if (e.key === 'Escape' && document.activeElement === $search) {
-        $search.value = '';
-        searchQuery = '';
-        $clearSearch.classList.remove('visible');
-        $search.blur();
-        render();
-      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); $('#cmd-input').focus(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); $('#add-input').focus(); $('#add-options').classList.add('open'); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
     });
-
-    // set today as default for due date picker
-    $dueDate.value = '';
   }
 
-  // ---- init ----
-  load();
-  applyTheme();
-  bindEvents();
-  render();
-  $input.focus();
+  function init() {
+    load();
+    applyTheme();
+    applySidebar();
+    bindEvents();
+    renderAll();
+    // set today as default for due picker
+    $('#add-due').value = '';
+
+    // mobile sidebar toggle
+    if (window.innerWidth <= 768) {
+      // add mobile hamburger if needed
+    }
+  }
+
+  init();
 })();
 </script>
 </body>
